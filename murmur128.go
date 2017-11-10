@@ -1,8 +1,7 @@
 package murmur3
 
 import (
-	//"encoding/binary"
-	"hash"
+	"fmt"
 	"unsafe"
 )
 
@@ -11,44 +10,32 @@ const (
 	c2_128 = 0x4cf5ad432745937f
 )
 
-// Make sure interfaces are correctly implemented.
-var (
-	_ hash.Hash = new(digest128)
-	_ Hash128   = new(digest128)
-	_ bmixer    = new(digest128)
-)
-
-// Hash128 represents a 128-bit hasher
-// Hack: the standard api doesn't define any Hash128 interface.
-type Hash128 interface {
-	hash.Hash
-	Sum128() (uint64, uint64)
-}
-
-// digest128 represents a partial evaluation of a 128 bites hash.
-type digest128 struct {
+// Digest128 is a murmur3 128 bit digest that can be written to
+// as many consequent times as necessary without heap allocations.
+type Digest128 struct {
 	digest
 	h1 uint64 // Unfinalized running hash part 1.
 	h2 uint64 // Unfinalized running hash part 2.
 }
 
-// New128 returns a 128-bit hasher
-func New128() Hash128 { return New128WithSeed(0) }
-
-// New128WithSeed returns a 128-bit hasher set with explicit seed value
-func New128WithSeed(seed uint32) Hash128 {
-	d := new(digest128)
-	d.seed = seed
-	d.bmixer = d
-	d.Reset()
-	return d
+// New128 returns a new 128 bit digest.
+func New128() Digest128 {
+	return New128WithSeed(0)
 }
 
-func (d *digest128) Size() int { return 16 }
+// New128WithSeed returns a new 128 bit digest with a seed.
+func New128WithSeed(seed uint32) Digest128 {
+	s := uint64(seed)
+	return Digest128{digest: digest{seed: seed}, h1: s, h2: s}
+}
 
-func (d *digest128) reset() { d.h1, d.h2 = uint64(d.seed), uint64(d.seed) }
+// Size returns the number of bytes Sum will return.
+func (d Digest128) Size() int {
+	return 16
+}
 
-func (d *digest128) Sum(b []byte) []byte {
+// Sum returns the current binary hash appended to input byte ref.
+func (d Digest128) Sum(b []byte) []byte {
 	h1, h2 := d.Sum128()
 	return append(b,
 		byte(h1>>56), byte(h1>>48), byte(h1>>40), byte(h1>>32),
@@ -59,7 +46,7 @@ func (d *digest128) Sum(b []byte) []byte {
 	)
 }
 
-func (d *digest128) bmix(p []byte) (tail []byte) {
+func (d Digest128) bmix(p []byte) (Digest128, []byte) {
 	h1, h2 := d.h1, d.h2
 
 	nblocks := len(p) / 16
@@ -86,35 +73,67 @@ func (d *digest128) bmix(p []byte) (tail []byte) {
 		h2 = h2*5 + 0x38495ab5
 	}
 	d.h1, d.h2 = h1, h2
-	return p[nblocks*d.Size():]
+	return d, p[nblocks*d.Size():]
 }
 
-func (d *digest128) Sum128() (h1, h2 uint64) {
+func (d Digest128) bmixbuf() Digest128 {
+	h1, h2 := d.h1, d.h2
 
+	if d.tail != d.Size() {
+		panic(fmt.Errorf("expected full block"))
+	}
+
+	k1, k2 := d.loadUint64(0), d.loadUint64(1)
+
+	k1 *= c1_128
+	k1 = (k1 << 31) | (k1 >> 33) // rotl64(k1, 31)
+	k1 *= c2_128
+	h1 ^= k1
+
+	h1 = (h1 << 27) | (h1 >> 37) // rotl64(h1, 27)
+	h1 += h2
+	h1 = h1*5 + 0x52dce729
+
+	k2 *= c2_128
+	k2 = (k2 << 33) | (k2 >> 31) // rotl64(k2, 33)
+	k2 *= c1_128
+	h2 ^= k2
+
+	h2 = (h2 << 31) | (h2 >> 33) // rotl64(h2, 31)
+	h2 += h1
+	h2 = h2*5 + 0x38495ab5
+
+	d.h1, d.h2 = h1, h2
+	d.tail = 0
+	return d
+}
+
+// Sum128 returns the 128 bit hash of the digest.
+func (d Digest128) Sum128() (h1, h2 uint64) {
 	h1, h2 = d.h1, d.h2
 
 	var k1, k2 uint64
-	switch len(d.tail) & 15 {
+	switch d.tail & 15 {
 	case 15:
-		k2 ^= uint64(d.tail[14]) << 48
+		k2 ^= uint64(d.buf[14]) << 48
 		fallthrough
 	case 14:
-		k2 ^= uint64(d.tail[13]) << 40
+		k2 ^= uint64(d.buf[13]) << 40
 		fallthrough
 	case 13:
-		k2 ^= uint64(d.tail[12]) << 32
+		k2 ^= uint64(d.buf[12]) << 32
 		fallthrough
 	case 12:
-		k2 ^= uint64(d.tail[11]) << 24
+		k2 ^= uint64(d.buf[11]) << 24
 		fallthrough
 	case 11:
-		k2 ^= uint64(d.tail[10]) << 16
+		k2 ^= uint64(d.buf[10]) << 16
 		fallthrough
 	case 10:
-		k2 ^= uint64(d.tail[9]) << 8
+		k2 ^= uint64(d.buf[9]) << 8
 		fallthrough
 	case 9:
-		k2 ^= uint64(d.tail[8]) << 0
+		k2 ^= uint64(d.buf[8]) << 0
 
 		k2 *= c2_128
 		k2 = (k2 << 33) | (k2 >> 31) // rotl64(k2, 33)
@@ -124,28 +143,28 @@ func (d *digest128) Sum128() (h1, h2 uint64) {
 		fallthrough
 
 	case 8:
-		k1 ^= uint64(d.tail[7]) << 56
+		k1 ^= uint64(d.buf[7]) << 56
 		fallthrough
 	case 7:
-		k1 ^= uint64(d.tail[6]) << 48
+		k1 ^= uint64(d.buf[6]) << 48
 		fallthrough
 	case 6:
-		k1 ^= uint64(d.tail[5]) << 40
+		k1 ^= uint64(d.buf[5]) << 40
 		fallthrough
 	case 5:
-		k1 ^= uint64(d.tail[4]) << 32
+		k1 ^= uint64(d.buf[4]) << 32
 		fallthrough
 	case 4:
-		k1 ^= uint64(d.tail[3]) << 24
+		k1 ^= uint64(d.buf[3]) << 24
 		fallthrough
 	case 3:
-		k1 ^= uint64(d.tail[2]) << 16
+		k1 ^= uint64(d.buf[2]) << 16
 		fallthrough
 	case 2:
-		k1 ^= uint64(d.tail[1]) << 8
+		k1 ^= uint64(d.buf[1]) << 8
 		fallthrough
 	case 1:
-		k1 ^= uint64(d.tail[0]) << 0
+		k1 ^= uint64(d.buf[0]) << 0
 		k1 *= c1_128
 		k1 = (k1 << 31) | (k1 >> 33) // rotl64(k1, 31)
 		k1 *= c2_128
@@ -167,6 +186,51 @@ func (d *digest128) Sum128() (h1, h2 uint64) {
 	return h1, h2
 }
 
+// Write will write bytes to the digest and return a new digest
+// representing the derived digest.
+func (d Digest128) Write(p []byte) Digest128 {
+	n := len(p)
+	d.clen += n
+
+	if d.tail > 0 {
+		// Stick back pending bytes.
+		nfree := d.Size() - d.tail // nfree ∈ [1, d.Size()-1].
+		if len(p) <= nfree {
+			// Everything can fit in buf
+			for i := 0; i < len(p); i++ {
+				d.buf[d.tail] = p[i]
+				d.tail++
+			}
+			if len(p) == int(nfree) {
+				d = d.bmixbuf()
+			}
+			return d
+		}
+
+		// One full block can be formed.
+		add := p[:nfree]
+		for i := 0; i < len(add); i++ {
+			d.buf[d.tail] = add[i]
+			d.tail++
+		}
+
+		// Process the full block
+		d = d.bmixbuf()
+
+		p = p[nfree:]
+	}
+
+	d, tail := d.bmix(p)
+
+	// Keep own copy of the 0 to Size()-1 pending bytes.
+	d.tail = len(tail)
+	for i := 0; i < d.tail; i++ {
+		d.buf[i] = tail[i]
+	}
+
+	return d
+}
+
 func fmix64(k uint64) uint64 {
 	k ^= k >> 33
 	k *= 0xff51afd7ed558ccd
@@ -176,28 +240,13 @@ func fmix64(k uint64) uint64 {
 	return k
 }
 
-/*
-func rotl64(x uint64, r byte) uint64 {
-	return (x << r) | (x >> (64 - r))
+// Sum128 returns the MurmurHash3 sum of data without any heap allocations.
+func Sum128(data []byte) (h1 uint64, h2 uint64) {
+	return Sum128WithSeed(data, 0)
 }
-*/
 
-// Sum128 returns the MurmurHash3 sum of data. It is equivalent to the
-// following sequence (without the extra burden and the extra allocation):
-//     hasher := New128()
-//     hasher.Write(data)
-//     return hasher.Sum128()
-func Sum128(data []byte) (h1 uint64, h2 uint64) { return Sum128WithSeed(data, 0) }
-
-// Sum128WithSeed returns the MurmurHash3 sum of data. It is equivalent to the
-// following sequence (without the extra burden and the extra allocation):
-//     hasher := New128WithSeed(seed)
-//     hasher.Write(data)
-//     return hasher.Sum128()
+// Sum128WithSeed returns the MurmurHash3 sum of data given a seed
+// without any heap allocations.
 func Sum128WithSeed(data []byte, seed uint32) (h1 uint64, h2 uint64) {
-	d := &digest128{h1: uint64(seed), h2: uint64(seed)}
-	d.seed = seed
-	d.tail = d.bmix(data)
-	d.clen = len(data)
-	return d.Sum128()
+	return New128WithSeed(seed).Write(data).Sum128()
 }

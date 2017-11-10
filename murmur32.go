@@ -3,15 +3,8 @@ package murmur3
 // http://code.google.com/p/guava-libraries/source/browse/guava/src/com/google/common/hash/Murmur3_32HashFunction.java
 
 import (
-	"hash"
+	"fmt"
 	"unsafe"
-)
-
-// Make sure interfaces are correctly implemented.
-var (
-	_ hash.Hash   = new(digest32)
-	_ hash.Hash32 = new(digest32)
-	_ bmixer      = new(digest32)
 )
 
 const (
@@ -19,35 +12,31 @@ const (
 	c2_32 uint32 = 0x1b873593
 )
 
-// digest32 represents a partial evaluation of a 32 bites hash.
-type digest32 struct {
+// Digest32 represents a partial evaluation of a 32 bits hash.
+type Digest32 struct {
 	digest
 	h1 uint32 // Unfinalized running hash.
 }
 
 // New32 returns new 32-bit hasher
-func New32() hash.Hash32 { return New32WithSeed(0) }
+func New32() Digest32 { return New32WithSeed(0) }
 
 // New32WithSeed returns new 32-bit hasher set with explicit seed value
-func New32WithSeed(seed uint32) hash.Hash32 {
-	d := new(digest32)
-	d.seed = seed
-	d.bmixer = d
-	d.Reset()
-	return d
+func New32WithSeed(seed uint32) Digest32 {
+	return Digest32{digest: digest{seed: seed}, h1: seed}
 }
 
-func (d *digest32) Size() int { return 4 }
+func (d Digest32) Size() int {
+	return 4
+}
 
-func (d *digest32) reset() { d.h1 = d.seed }
-
-func (d *digest32) Sum(b []byte) []byte {
+func (d Digest32) Sum(b []byte) []byte {
 	h := d.Sum32()
 	return append(b, byte(h>>24), byte(h>>16), byte(h>>8), byte(h))
 }
 
 // Digest as many blocks as possible.
-func (d *digest32) bmix(p []byte) (tail []byte) {
+func (d Digest32) bmix(p []byte) (Digest32, []byte) {
 	h1 := d.h1
 
 	nblocks := len(p) / 4
@@ -63,23 +52,45 @@ func (d *digest32) bmix(p []byte) (tail []byte) {
 		h1 = h1*4 + h1 + 0xe6546b64
 	}
 	d.h1 = h1
-	return p[nblocks*d.Size():]
+	return d, p[nblocks*d.Size():]
 }
 
-func (d *digest32) Sum32() (h1 uint32) {
+func (d Digest32) bmixbuf() Digest32 {
+	h1 := d.h1
+
+	if d.tail != d.Size() {
+		panic(fmt.Errorf("expected full block"))
+	}
+
+	k1 := d.loadUint32(0)
+
+	k1 *= c1_32
+	k1 = (k1 << 15) | (k1 >> 17) // rotl32(k1, 15)
+	k1 *= c2_32
+
+	h1 ^= k1
+	h1 = (h1 << 13) | (h1 >> 19) // rotl32(h1, 13)
+	h1 = h1*4 + h1 + 0xe6546b64
+
+	d.h1 = h1
+	d.tail = 0
+	return d
+}
+
+func (d Digest32) Sum32() (h1 uint32) {
 
 	h1 = d.h1
 
 	var k1 uint32
-	switch len(d.tail) & 3 {
+	switch d.tail & 3 {
 	case 3:
-		k1 ^= uint32(d.tail[2]) << 16
+		k1 ^= uint32(d.buf[2]) << 16
 		fallthrough
 	case 2:
-		k1 ^= uint32(d.tail[1]) << 8
+		k1 ^= uint32(d.buf[1]) << 8
 		fallthrough
 	case 1:
-		k1 ^= uint32(d.tail[0])
+		k1 ^= uint32(d.buf[0])
 		k1 *= c1_32
 		k1 = (k1 << 15) | (k1 >> 17) // rotl32(k1, 15)
 		k1 *= c2_32
@@ -95,6 +106,51 @@ func (d *digest32) Sum32() (h1 uint32) {
 	h1 ^= h1 >> 16
 
 	return h1
+}
+
+// Write will write bytes to the digest and return a new digest
+// representing the derived digest.
+func (d Digest32) Write(p []byte) Digest32 {
+	n := len(p)
+	d.clen += n
+
+	if d.tail > 0 {
+		// Stick back pending bytes.
+		nfree := d.Size() - d.tail // nfree ∈ [1, d.size-1].
+		if len(p) <= int(nfree) {
+			// Everything can fit in buf
+			for i := 0; i < len(p); i++ {
+				d.buf[d.tail] = p[i]
+				d.tail++
+			}
+			if len(p) == int(nfree) {
+				d = d.bmixbuf()
+			}
+			return d
+		}
+
+		// One full block can be formed.
+		add := p[:nfree]
+		for i := 0; i < len(add); i++ {
+			d.buf[d.tail] = add[i]
+			d.tail++
+		}
+
+		// Process the full block
+		d = d.bmixbuf()
+
+		p = p[nfree:]
+	}
+
+	d, tail := d.bmix(p)
+
+	// Keep own copy of the 0 to Size()-1 pending bytes.
+	d.tail = len(tail)
+	for i := 0; i < d.tail; i++ {
+		d.buf[i] = tail[i]
+	}
+
+	return d
 }
 
 /*
@@ -116,7 +172,6 @@ func Sum32(data []byte) uint32 { return Sum32WithSeed(data, 0) }
 //     hasher.Write(data)
 //     return hasher.Sum32()
 func Sum32WithSeed(data []byte, seed uint32) uint32 {
-
 	h1 := seed
 
 	nblocks := len(data) / 4

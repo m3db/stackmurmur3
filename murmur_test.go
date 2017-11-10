@@ -2,7 +2,12 @@ package murmur3
 
 import (
 	"fmt"
+	"math/rand"
+	"runtime"
 	"testing"
+
+	"github.com/magiconair/properties/assert"
+	murmur3origin "github.com/spaolacci/murmur3"
 )
 
 var data = []struct {
@@ -34,14 +39,12 @@ var data = []struct {
 func TestRefStrings(t *testing.T) {
 	for _, elem := range data {
 
-		h32 := New32WithSeed(elem.seed)
-		h32.Write([]byte(elem.s))
+		h32 := New32WithSeed(elem.seed).Write([]byte(elem.s))
 		if v := h32.Sum32(); v != elem.h32 {
 			t.Errorf("[Hash32] key: '%s', seed: '%d': 0x%x (want 0x%x)", elem.s, elem.seed, v, elem.h32)
 		}
 
-		h32.Reset()
-		h32.Write([]byte(elem.s))
+		h32 = New32WithSeed(elem.seed).Write([]byte(elem.s))
 		target := fmt.Sprintf("%08x", elem.h32)
 		if p := fmt.Sprintf("%x", h32.Sum(nil)); p != target {
 			t.Errorf("[Hash32] key: '%s', seed: '%d': %s (want %s)", elem.s, elem.seed, p, target)
@@ -51,14 +54,12 @@ func TestRefStrings(t *testing.T) {
 			t.Errorf("[Hash32] key '%s', seed: '%d': 0x%x (want 0x%x)", elem.s, elem.seed, v, elem.h32)
 		}
 
-		h64 := New64WithSeed(elem.seed)
-		h64.Write([]byte(elem.s))
+		h64 := New64WithSeed(elem.seed).Write([]byte(elem.s))
 		if v := h64.Sum64(); v != elem.h64_1 {
 			t.Errorf("'[Hash64] key: '%s', seed: '%d': 0x%x (want 0x%x)", elem.s, elem.seed, v, elem.h64_1)
 		}
 
-		h64.Reset()
-		h64.Write([]byte(elem.s))
+		h64 = New64WithSeed(elem.seed).Write([]byte(elem.s))
 		target = fmt.Sprintf("%016x", elem.h64_1)
 		if p := fmt.Sprintf("%x", h64.Sum(nil)); p != target {
 			t.Errorf("[Hash64] key: '%s', seed: '%d': %s (want %s)", elem.s, elem.seed, p, target)
@@ -68,15 +69,12 @@ func TestRefStrings(t *testing.T) {
 			t.Errorf("[Hash64] key: '%s', seed: '%d': 0x%x (want 0x%x)", elem.s, elem.seed, v, elem.h64_1)
 		}
 
-		h128 := New128WithSeed(elem.seed)
-
-		h128.Write([]byte(elem.s))
+		h128 := New128WithSeed(elem.seed).Write([]byte(elem.s))
 		if v1, v2 := h128.Sum128(); v1 != elem.h64_1 || v2 != elem.h64_2 {
 			t.Errorf("[Hash128] key: '%s', seed: '%d': 0x%x-0x%x (want 0x%x-0x%x)", elem.s, elem.seed, v1, v2, elem.h64_1, elem.h64_2)
 		}
 
-		h128.Reset()
-		h128.Write([]byte(elem.s))
+		h128 = New128WithSeed(elem.seed).Write([]byte(elem.s))
 		target = fmt.Sprintf("%016x%016x", elem.h64_1, elem.h64_2)
 		if p := fmt.Sprintf("%x", h128.Sum(nil)); p != target {
 			t.Errorf("[Hash128] key: '%s', seed: '%d': %s (want %s)", elem.s, elem.seed, p, target)
@@ -100,8 +98,8 @@ func TestIncremental(t *testing.T) {
 			}
 			s := elem.s[i:j]
 			print(s + "|")
-			h32.Write([]byte(s))
-			h128.Write([]byte(s))
+			h32 = h32.Write([]byte(s))
+			h128 = h128.Write([]byte(s))
 		}
 		println()
 		if v := h32.Sum32(); v != elem.h32 {
@@ -114,6 +112,122 @@ func TestIncremental(t *testing.T) {
 }
 
 //---
+
+func originIncrementalBench128(b *testing.B, length int) {
+	buf := make([]byte, length)
+	b.SetBytes(int64(length))
+	h := murmur3origin.New128()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		h.Reset()
+		h.Write(buf)
+		h.Sum128()
+		// escape analysis forces this to be heap allocated
+		h.Write([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15})
+		h.Sum128()
+	}
+}
+
+func Benchmark_Incremental_Origin_128_1(b *testing.B) {
+	originIncrementalBench128(b, 1)
+}
+func Benchmark_Incremental_Origin_128_2(b *testing.B) {
+	originIncrementalBench128(b, 2)
+}
+func Benchmark_Incremental_Origin_128_4(b *testing.B) {
+	originIncrementalBench128(b, 4)
+}
+func Benchmark_Incremental_Origin_128_8(b *testing.B) {
+	originIncrementalBench128(b, 8)
+}
+func Benchmark_Incremental_Origin_128_16(b *testing.B) {
+	originIncrementalBench128(b, 16)
+}
+func Benchmark_Incremental_Origin_128_32(b *testing.B) {
+	originIncrementalBench128(b, 128)
+}
+func Benchmark_Incremental_Origin_128_64(b *testing.B) {
+	originIncrementalBench128(b, 64)
+}
+func Benchmark_Incremental_Origin_128_128(b *testing.B) {
+	originIncrementalBench128(b, 128)
+}
+func Benchmark_Incremental_Origin_128_256(b *testing.B) {
+	originIncrementalBench128(b, 256)
+}
+func Benchmark_Incremental_Origin_128_512(b *testing.B) {
+	originIncrementalBench128(b, 512)
+}
+func Benchmark_Incremental_Origin_128_1024(b *testing.B) {
+	originIncrementalBench128(b, 1024)
+}
+func Benchmark_Incremental_Origin_128_2048(b *testing.B) {
+	originIncrementalBench128(b, 2048)
+}
+func Benchmark_Incremental_Origin_128_4096(b *testing.B) {
+	originIncrementalBench128(b, 4096)
+}
+func Benchmark_Incremental_Origin_128_8192(b *testing.B) {
+	originIncrementalBench128(b, 8192)
+}
+
+func forkedIncrementalBench128(b *testing.B, length int) {
+	buf := make([]byte, length)
+	b.SetBytes(int64(length))
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		h := New128()
+		h = h.Write(buf)
+		// escape analysis success so this is stack allocated
+		h = h.Write([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15})
+		h.Sum128()
+	}
+}
+
+func Benchmark_Incremental_Forked_128_1(b *testing.B) {
+	forkedIncrementalBench128(b, 1)
+}
+func Benchmark_Incremental_Forked_128_2(b *testing.B) {
+	forkedIncrementalBench128(b, 2)
+}
+func Benchmark_Incremental_Forked_128_4(b *testing.B) {
+	forkedIncrementalBench128(b, 4)
+}
+func Benchmark_Incremental_Forked_128_8(b *testing.B) {
+	forkedIncrementalBench128(b, 8)
+}
+func Benchmark_Incremental_Forked_128_16(b *testing.B) {
+	forkedIncrementalBench128(b, 16)
+}
+func Benchmark_Incremental_Forked_128_32(b *testing.B) {
+	forkedIncrementalBench128(b, 128)
+}
+func Benchmark_Incremental_Forked_128_64(b *testing.B) {
+	forkedIncrementalBench128(b, 64)
+}
+func Benchmark_Incremental_Forked_128_128(b *testing.B) {
+	forkedIncrementalBench128(b, 128)
+}
+func Benchmark_Incremental_Forked_128_256(b *testing.B) {
+	forkedIncrementalBench128(b, 256)
+}
+func Benchmark_Incremental_Forked_128_512(b *testing.B) {
+	forkedIncrementalBench128(b, 512)
+}
+func Benchmark_Incremental_Forked_128_1024(b *testing.B) {
+	forkedIncrementalBench128(b, 1024)
+}
+func Benchmark_Incremental_Forked_128_2048(b *testing.B) {
+	forkedIncrementalBench128(b, 2048)
+}
+func Benchmark_Incremental_Forked_128_4096(b *testing.B) {
+	forkedIncrementalBench128(b, 4096)
+}
+func Benchmark_Incremental_Forked_128_8192(b *testing.B) {
+	forkedIncrementalBench128(b, 8192)
+}
 
 func bench32(b *testing.B, length int) {
 	buf := make([]byte, length)
@@ -140,7 +254,7 @@ func Benchmark32_16(b *testing.B) {
 	bench32(b, 16)
 }
 func Benchmark32_32(b *testing.B) {
-	bench32(b, 32)
+	bench32(b, 128)
 }
 func Benchmark32_64(b *testing.B) {
 	bench32(b, 64)
@@ -173,7 +287,7 @@ func benchPartial32(b *testing.B, length int) {
 	buf := make([]byte, length)
 	b.SetBytes(int64(length))
 
-	start := (32 / 8) / 2
+	start := (128 / 8) / 2
 	chunks := 7
 	k := length / chunks
 	tail := (length - start) % k
@@ -199,7 +313,7 @@ func BenchmarkPartial32_16(b *testing.B) {
 	benchPartial32(b, 16)
 }
 func BenchmarkPartial32_32(b *testing.B) {
-	benchPartial32(b, 32)
+	benchPartial32(b, 128)
 }
 func BenchmarkPartial32_64(b *testing.B) {
 	benchPartial32(b, 64)
@@ -235,7 +349,7 @@ func Benchmark128_16(b *testing.B) {
 	bench128(b, 16)
 }
 func Benchmark128_32(b *testing.B) {
-	bench128(b, 32)
+	bench128(b, 128)
 }
 func Benchmark128_64(b *testing.B) {
 	bench128(b, 64)
@@ -260,6 +374,87 @@ func Benchmark128_4096(b *testing.B) {
 }
 func Benchmark128_8192(b *testing.B) {
 	bench128(b, 8192)
+}
+
+func TestDigest32ZeroAllocWrite(t *testing.T) {
+	d := make([]byte, 128)
+	for i := range d {
+		d[i] = byte(i)
+	}
+
+	var (
+		h     = New32WithSeed(uint32(rand.Int()))
+		buf   = make([]byte, 4096)
+		stats runtime.MemStats
+	)
+	runtime.ReadMemStats(&stats)
+	startAllocs := stats.Mallocs
+
+	for i := 0; i < 1000; i++ {
+		n, err := rand.Read(buf)
+		if err != nil {
+			t.FailNow()
+		}
+		h = h.Write(buf[:n])
+	}
+
+	runtime.ReadMemStats(&stats)
+	endAllocs := stats.Mallocs
+	assert.Equal(t, startAllocs, endAllocs)
+}
+
+func TestDigest64ZeroAllocWrite(t *testing.T) {
+	d := make([]byte, 128)
+	for i := range d {
+		d[i] = byte(i)
+	}
+
+	var (
+		h     = New64WithSeed(uint32(rand.Int()))
+		buf   = make([]byte, 4096)
+		stats runtime.MemStats
+	)
+	runtime.ReadMemStats(&stats)
+	startAllocs := stats.Mallocs
+
+	for i := 0; i < 1000; i++ {
+		n, err := rand.Read(buf)
+		if err != nil {
+			t.FailNow()
+		}
+		h = h.Write(buf[:n])
+	}
+
+	runtime.ReadMemStats(&stats)
+	endAllocs := stats.Mallocs
+	assert.Equal(t, startAllocs, endAllocs)
+}
+
+func TestDigest128ZeroAllocWrite(t *testing.T) {
+	d := make([]byte, 128)
+	for i := range d {
+		d[i] = byte(i)
+	}
+
+	var (
+		h     = New128WithSeed(uint32(rand.Int()))
+		buf   = make([]byte, 4096)
+		stats runtime.MemStats
+	)
+	runtime.ReadMemStats(&stats)
+	startAllocs := stats.Mallocs
+
+	for i := 0; i < 1000; i++ {
+		n, err := rand.Read(buf)
+		if err != nil {
+			t.FailNow()
+		}
+		h = h.Write(buf[:n])
+	}
+
+	runtime.ReadMemStats(&stats)
+	endAllocs := stats.Mallocs
+	assert.Equal(t, startAllocs, endAllocs)
 }
 
 //---
