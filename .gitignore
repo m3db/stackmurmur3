@@ -24,3 +24,5 @@ _testmain.go
 # Go vendored source
 vendor/
 
+# Coverage
+coverage.out
