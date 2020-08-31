@@ -1,6 +1,8 @@
 murmur3
 =======
 
+### Note: This is a fork of [github.com/twmb/murmur3](http://github.com/twmb/murmur3), which is also a fork of `spaolacci/murmur3`) that provides streaming digests without any additional allocations, unlike `Hash` interface based original implementation.
+
 Native Go implementation of Austin Appleby's third MurmurHash revision (aka
 MurmurHash3).
 

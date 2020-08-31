@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/magiconair/properties/assert"
 	murmur3origin "github.com/spaolacci/murmur3"
+	"github.com/stretchr/testify/assert"
 )
 
 var data = []struct {
