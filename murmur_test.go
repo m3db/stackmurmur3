@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"testing"
 
+	murmur3origin "github.com/spaolacci/murmur3"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -108,6 +109,67 @@ func TestIncremental(t *testing.T) {
 			t.Errorf("[Hash128] key: '%s', seed: '%d': 0x%x-0x%x (want 0x%x-0x%x)", elem.s, elem.seed, v1, v2, elem.h64_1, elem.h64_2)
 		}
 	}
+}
+
+//---
+
+func originIncrementalBench128(b *testing.B, length int) {
+	buf := make([]byte, length)
+	b.SetBytes(int64(length))
+	h := murmur3origin.New128()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		h.Reset()
+		h.Write(buf)
+		h.Sum128()
+		// escape analysis forces this to be heap allocated
+		h.Write([]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15})
+		h.Sum128()
+	}
+}
+
+func Benchmark_Incremental_Origin_128_1(b *testing.B) {
+	originIncrementalBench128(b, 1)
+}
+func Benchmark_Incremental_Origin_128_2(b *testing.B) {
+	originIncrementalBench128(b, 2)
+}
+func Benchmark_Incremental_Origin_128_4(b *testing.B) {
+	originIncrementalBench128(b, 4)
+}
+func Benchmark_Incremental_Origin_128_8(b *testing.B) {
+	originIncrementalBench128(b, 8)
+}
+func Benchmark_Incremental_Origin_128_16(b *testing.B) {
+	originIncrementalBench128(b, 16)
+}
+func Benchmark_Incremental_Origin_128_32(b *testing.B) {
+	originIncrementalBench128(b, 128)
+}
+func Benchmark_Incremental_Origin_128_64(b *testing.B) {
+	originIncrementalBench128(b, 64)
+}
+func Benchmark_Incremental_Origin_128_128(b *testing.B) {
+	originIncrementalBench128(b, 128)
+}
+func Benchmark_Incremental_Origin_128_256(b *testing.B) {
+	originIncrementalBench128(b, 256)
+}
+func Benchmark_Incremental_Origin_128_512(b *testing.B) {
+	originIncrementalBench128(b, 512)
+}
+func Benchmark_Incremental_Origin_128_1024(b *testing.B) {
+	originIncrementalBench128(b, 1024)
+}
+func Benchmark_Incremental_Origin_128_2048(b *testing.B) {
+	originIncrementalBench128(b, 2048)
+}
+func Benchmark_Incremental_Origin_128_4096(b *testing.B) {
+	originIncrementalBench128(b, 4096)
+}
+func Benchmark_Incremental_Origin_128_8192(b *testing.B) {
+	originIncrementalBench128(b, 8192)
 }
 
 func forkedIncrementalBench128(b *testing.B, length int) {
